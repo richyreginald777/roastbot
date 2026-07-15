@@ -28,10 +28,18 @@ export const config = {
     imageModel: optional('ROASTBOT_GEMINI_IMAGE_MODEL', 'gemini-3.1-flash-lite-image'),
   },
   db: {
+    // DATABASE_URL (Supabase/managed-Postgres convention) takes precedence
+    // over discrete vars. When set, host/port/user/password/name are ignored.
+    connectionString: process.env.DATABASE_URL || '',
+    // SSL on for any remote connection string (Supabase requires it);
+    // off for localhost. Override either way with ROASTBOT_DB_SSL=true/false.
+    ssl: process.env.ROASTBOT_DB_SSL
+      ? process.env.ROASTBOT_DB_SSL === 'true'
+      : Boolean(process.env.DATABASE_URL) && !/localhost|127\.0\.0\.1/.test(process.env.DATABASE_URL || ''),
     host: optional('ROASTBOT_DB_HOST', 'localhost'),
     port: parseInt(optional('ROASTBOT_DB_PORT', '5430'), 10),
     user: optional('ROASTBOT_DB_USER', 'postgres'),
-    password: required('ROASTBOT_DB_PASSWORD'),
+    password: process.env.DATABASE_URL ? optional('ROASTBOT_DB_PASSWORD', '') : required('ROASTBOT_DB_PASSWORD'),
     name: optional('ROASTBOT_DB_NAME', 'roastbot'),
   },
   bot: {

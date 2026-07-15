@@ -2,16 +2,25 @@ import { Pool } from 'pg';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
 
-const pool = new Pool({
-  host: config.db.host,
-  port: config.db.port,
-  user: config.db.user,
-  password: config.db.password,
-  database: config.db.name,
+const commonPoolOptions = {
   max: 10,
   idleTimeoutMillis: 30_000,
   connectionTimeoutMillis: 5_000,
-});
+  // Render (and most managed Postgres) requires SSL on external connections;
+  // rejectUnauthorized:false because managed providers use their own CA chains
+  ssl: config.db.ssl ? { rejectUnauthorized: false } : undefined,
+};
+
+const pool = config.db.connectionString
+  ? new Pool({ connectionString: config.db.connectionString, ...commonPoolOptions })
+  : new Pool({
+      host: config.db.host,
+      port: config.db.port,
+      user: config.db.user,
+      password: config.db.password,
+      database: config.db.name,
+      ...commonPoolOptions,
+    });
 
 pool.on('error', (err) => {
   logger.error('Unexpected PostgreSQL pool error', { error: err.message });
@@ -36,10 +45,9 @@ export async function testConnection(): Promise<void> {
         : err.message;
     logger.error('PostgreSQL connection failed', {
       error: detail,
-      host: config.db.host,
-      port: config.db.port,
-      database: config.db.name,
-      hint: 'Is Postgres running on this host:port, and does the database exist?',
+      via: config.db.connectionString ? 'DATABASE_URL' : `${config.db.host}:${config.db.port}/${config.db.name}`,
+      ssl: config.db.ssl,
+      hint: 'Is Postgres reachable, does the database exist, and is SSL configured correctly?',
     });
     throw err;
   }
