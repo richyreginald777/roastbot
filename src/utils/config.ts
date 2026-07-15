@@ -16,6 +16,7 @@ function optional(name: string, fallback: string): string {
   return process.env[name] || fallback;
 }
 
+//gemini-3.1-flash-lite-image
 export const config = {
   slack: {
     botToken: required('ROASTBOT_SLACK_BOT_TOKEN'),
@@ -25,7 +26,7 @@ export const config = {
   gemini: {
     apiKey: required('GEMINI_API_KEY'),
     model: optional('ROASTBOT_GEMINI_MODEL', 'gemini-3-flash-preview'),
-    imageModel: optional('ROASTBOT_GEMINI_IMAGE_MODEL', 'gemini-3.1-flash-lite-image'),
+    imageModel: optional('ROASTBOT_GEMINI_IMAGE_MODEL', 'gemini-3-flash-lite-image'),
   },
   db: {
     // DATABASE_URL (Supabase/managed-Postgres convention) takes precedence
