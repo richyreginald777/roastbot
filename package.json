@@ -1,0 +1,31 @@
+{
+  "name": "roastbot",
+  "version": "1.0.0",
+  "description": "Slack roast-comedy bot powered by Gemini Flash — roasts, jokes, and learns from reactions",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node --transpile-only src/index.ts",
+    "dev:watch": "nodemon --exec ts-node --transpile-only src/index.ts",
+    "seed:humor": "ts-node --transpile-only src/scripts/seed-humor.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@google/genai": "^1.44.0",
+    "@slack/bolt": "^3.21.1",
+    "dotenv": "^16.4.5",
+    "pg": "^8.13.0",
+    "winston": "^3.14.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/pg": "^8.11.6",
+    "nodemon": "^3.1.4",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.4.5"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
