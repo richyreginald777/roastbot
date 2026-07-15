@@ -4,10 +4,15 @@ import { seedProfilesFromTemplates } from './context/loader';
 import { createSlackApp } from './slack/app';
 import { registerHandlers } from './slack/handlers';
 import { threadManager } from './state/thread-manager';
+import { startHealthServer, startKeepAlive, markSlackReady } from './server';
 import { logger } from './utils/logger';
 
 async function main(): Promise<void> {
   logger.info('RoastBot starting up...');
+
+  // 0. Bind the HTTP port FIRST — Render's port scan must succeed even if
+  // the DB or Slack take a while (or fail) during startup
+  startHealthServer();
 
   // 1. Verify PostgreSQL connection
   await testConnection();
@@ -26,7 +31,11 @@ async function main(): Promise<void> {
 
   // 6. Start listening
   await app.start();
+  markSlackReady();
   logger.info('🔥 RoastBot is running! Listening for mentions and channel messages…');
+
+  // 7. Keep the Render free instance awake (no-op outside Render)
+  startKeepAlive();
 
   // Periodic cleanup of stale in-memory state (every hour)
   setInterval(() => {
