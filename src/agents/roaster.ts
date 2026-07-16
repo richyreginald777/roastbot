@@ -1,4 +1,3 @@
-import { GoogleGenAI } from '@google/genai';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
 import { getProfile } from '../db/profiles';
@@ -6,8 +5,6 @@ import { TriggerType } from '../db/interactions';
 import { ChannelMessage, ThreadTurn, threadManager } from '../state/thread-manager';
 import { withModelFallback } from '../utils/model-fallback';
 import { generateMemeImage } from './memer';
-
-const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
 export interface RoasterInput {
   mode: TriggerType;            // 'mention' | 'channel' | 'thread'
@@ -253,7 +250,7 @@ export async function runRoaster(input: RoasterInput): Promise<RoasterOutput> {
     contents: string,
   ): Promise<{ parsed: { respond?: boolean; response?: string | null } | null }> => {
     let usedModel = '';
-    const response = await withModelFallback(config.gemini.textModels, (model) => {
+    const response = await withModelFallback(config.gemini.textModels, (ai, model) => {
       usedModel = model;
       return ai.models.generateContent({
         model,
