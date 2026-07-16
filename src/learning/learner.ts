@@ -4,6 +4,7 @@ import { getProfile, upsertProfile, ProfileUpdateCost } from '../db/profiles';
 import { ThreadTurn } from '../state/thread-manager';
 import { withModelFallback } from '../utils/model-fallback';
 import { textCallCost } from '../utils/pricing';
+import { parseModelJson } from '../utils/json-repair';
 
 // Cap profile size so the roaster prompt doesn't grow without bound
 const MAX_PROFILE_CHARS = 6000;
@@ -90,6 +91,9 @@ export async function learnFromExchange(
         config: {
           systemInstruction: STATIC_LEARNER_PROMPT,
           responseMimeType: 'application/json',
+          // Learner returns two full profile documents (~4K tokens of JSON)
+          // plus thinking budget — give it plenty of headroom
+          maxOutputTokens: 16384,
         },
       });
     });
@@ -103,11 +107,12 @@ export async function learnFromExchange(
     let costInfo: ProfileUpdateCost | undefined = { modelUsed: usedModel, costUsd };
 
     const raw = response.text || '{}';
-    let parsed: { userProfile?: string | null; globalProfile?: string | null };
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      logger.error('Failed to parse learner response', { raw });
+    const parsed = parseModelJson<{ userProfile?: string | null; globalProfile?: string | null }>(raw);
+    if (!parsed) {
+      logger.error('Failed to parse learner response (even after repair)', {
+        raw,
+        finishReason: response.candidates?.[0]?.finishReason,
+      });
       return;
     }
 
