@@ -1,9 +1,7 @@
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
+import { ThinkingLevel } from '@google/genai';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
 import { withModelFallback } from '../utils/model-fallback';
-
-const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
 // --- Prompt builder -----------------------------------------------------------
 // Tuned for gemini-3.1-flash-lite-image ("Nano Banana 2 Lite") based on the
@@ -55,7 +53,7 @@ export async function generateMemeImage(caption: string, scene: string): Promise
   try {
     logger.info('Generating meme image...');
     let usedModel = '';
-    const response = await withModelFallback(config.gemini.imageModels, (model) => {
+    const response = await withModelFallback(config.gemini.imageModels, (ai, model) => {
       usedModel = model;
       return ai.models.generateContent({
         model,

@@ -1,11 +1,8 @@
-import { GoogleGenAI } from '@google/genai';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
 import { getProfile, upsertProfile } from '../db/profiles';
 import { ThreadTurn } from '../state/thread-manager';
 import { withModelFallback } from '../utils/model-fallback';
-
-const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
 // Cap profile size so the roaster prompt doesn't grow without bound
 const MAX_PROFILE_CHARS = 6000;
@@ -83,7 +80,7 @@ export async function learnFromExchange(
   ].join('\n');
 
   try {
-    const response = await withModelFallback(config.gemini.textModels, (model) =>
+    const response = await withModelFallback(config.gemini.textModels, (ai, model) =>
       ai.models.generateContent({
         model,
         contents: userMessage,

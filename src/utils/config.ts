@@ -23,7 +23,14 @@ export const config = {
     botUserId: required('ROASTBOT_BOT_USER_ID'),
   },
   gemini: {
-    apiKey: required('GEMINI_API_KEY'),
+    // All available API keys — rotated on rate limits. NOTE: Gemini quotas
+    // are per Google Cloud PROJECT, not per key; rotation only helps if the
+    // keys belong to different projects.
+    apiKeys: [
+      required('GEMINI_API_KEY'),
+      process.env.GEMINI_API_KEY_2,
+      process.env.GEMINI_API_KEY_3,
+    ].filter(Boolean) as string[],
     // Fallback chains: first model is preferred; on rate limit / error the
     // next in line is tried. Flash + Lite models only — no Pro.
     textModels: optional(

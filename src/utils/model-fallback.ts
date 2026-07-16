@@ -1,11 +1,23 @@
+import { GoogleGenAI } from '@google/genai';
+import { config } from './config';
 import { logger } from './logger';
 
-// Simple model fallback: try each model in the chain; on error (rate limit or
-// otherwise) bench that model briefly and try the next one. Rate-limited
-// models get a longer bench so we don't burn a doomed request per message.
+// Model fallback × key rotation.
+//
+// For each model in the chain, every API key is tried before degrading to the
+// next model — keeping the better model on a fresh key beats dropping to a
+// worse model. Failed (model, key) pairs are benched briefly so a rate-limited
+// combination isn't re-probed on every message.
+//
+// NOTE: Gemini quotas are per Google Cloud project, not per key — rotation
+// only adds throughput when the keys come from different projects.
 
-const RATE_LIMIT_BENCH_MS = 60_000; // 429s: skip the model for a minute
+const RATE_LIMIT_BENCH_MS = 60_000; // 429s: skip the pair for a minute
 const ERROR_BENCH_MS = 30_000;      // other errors: shorter bench
+
+const clients: GoogleGenAI[] = config.gemini.apiKeys.map(
+  (apiKey) => new GoogleGenAI({ apiKey }),
+);
 
 const benchedUntil = new Map<string, number>();
 
@@ -16,26 +28,28 @@ function isRateLimitError(err: any): boolean {
 
 export async function withModelFallback<T>(
   models: string[],
-  fn: (model: string) => Promise<T>,
+  fn: (ai: GoogleGenAI, model: string) => Promise<T>,
 ): Promise<T> {
   let lastErr: any;
 
   for (const model of models) {
-    if ((benchedUntil.get(model) ?? 0) > Date.now()) continue;
+    for (let keyIdx = 0; keyIdx < clients.length; keyIdx++) {
+      const benchKey = `${model}#key${keyIdx}`;
+      if ((benchedUntil.get(benchKey) ?? 0) > Date.now()) continue;
 
-    try {
-      const result = await fn(model);
-      return result;
-    } catch (err: any) {
-      lastErr = err;
-      const rateLimited = isRateLimitError(err);
-      benchedUntil.set(model, Date.now() + (rateLimited ? RATE_LIMIT_BENCH_MS : ERROR_BENCH_MS));
-      logger.warn(`Model ${model} failed — falling back to next in chain`, {
-        rateLimited,
-        error: String(err?.message ?? err),
-      });
+      try {
+        return await fn(clients[keyIdx], model);
+      } catch (err: any) {
+        lastErr = err;
+        const rateLimited = isRateLimitError(err);
+        benchedUntil.set(benchKey, Date.now() + (rateLimited ? RATE_LIMIT_BENCH_MS : ERROR_BENCH_MS));
+        logger.warn(`Model ${model} (key #${keyIdx + 1}) failed — trying next key/model`, {
+          rateLimited,
+          error: String(err?.message ?? err),
+        });
+      }
     }
   }
 
-  throw lastErr ?? new Error('All models in the fallback chain are benched or failed');
+  throw lastErr ?? new Error('All model/key combinations are benched or failed');
 }
