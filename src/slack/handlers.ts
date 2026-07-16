@@ -90,7 +90,8 @@ export function registerHandlers(app: App): void {
         `📊 *RoastBot stats*\n` +
           `• Messages seen: ${s.total}\n` +
           `• Roasts delivered: ${s.responded}\n` +
-          `• Gemini tokens: ${s.tokensIn.toLocaleString()} in / ${s.tokensOut.toLocaleString()} out`,
+          `• Gemini tokens: ${s.tokensIn.toLocaleString()} in / ${s.tokensOut.toLocaleString()} out\n` +
+          `• Cost (standard rates): $${s.costUsd.toFixed(4)}`,
       );
       return;
     }
@@ -225,6 +226,8 @@ async function handleRoast(
       responded: result.respond,
       inputTokens: result.tokens.input,
       outputTokens: result.tokens.output,
+      modelUsed: result.modelUsed,
+      costUsd: result.costUsd,
     });
 
     if (!result.respond || !result.response) {

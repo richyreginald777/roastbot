@@ -1,8 +1,9 @@
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
-import { getProfile, upsertProfile } from '../db/profiles';
+import { getProfile, upsertProfile, ProfileUpdateCost } from '../db/profiles';
 import { ThreadTurn } from '../state/thread-manager';
 import { withModelFallback } from '../utils/model-fallback';
+import { textCallCost } from '../utils/pricing';
 
 // Cap profile size so the roaster prompt doesn't grow without bound
 const MAX_PROFILE_CHARS = 6000;
@@ -80,16 +81,26 @@ export async function learnFromExchange(
   ].join('\n');
 
   try {
-    const response = await withModelFallback(config.gemini.textModels, (ai, model) =>
-      ai.models.generateContent({
+    let usedModel = '';
+    const response = await withModelFallback(config.gemini.textModels, (ai, model) => {
+      usedModel = model;
+      return ai.models.generateContent({
         model,
         contents: userMessage,
         config: {
           systemInstruction: STATIC_LEARNER_PROMPT,
           responseMimeType: 'application/json',
         },
-      }),
-    );
+      });
+    });
+
+    // Cost of this learner call — recorded on the profile-history row(s) it
+    // produces. If the run updates both profiles, the cost is attached to the
+    // FIRST update only, so it's never double-counted.
+    const inputTokens = response.usageMetadata?.promptTokenCount || 0;
+    const outputTokens = response.usageMetadata?.candidatesTokenCount || 0;
+    const costUsd = textCallCost(usedModel, inputTokens, outputTokens);
+    let costInfo: ProfileUpdateCost | undefined = { modelUsed: usedModel, costUsd };
 
     const raw = response.text || '{}';
     let parsed: { userProfile?: string | null; globalProfile?: string | null };
@@ -103,16 +114,17 @@ export async function learnFromExchange(
     if (parsed.userProfile && parsed.userProfile.trim()) {
       const content = parsed.userProfile.slice(0, MAX_PROFILE_CHARS);
       if (content !== userProfile?.content) {
-        await upsertProfile(userKey, 'user', content);
-        logger.info('Learner updated user profile', { userKey });
+        await upsertProfile(userKey, 'user', content, costInfo);
+        costInfo = undefined; // cost recorded once
+        logger.info('Learner updated user profile', { userKey, model: usedModel, costUsd });
       }
     }
 
     if (parsed.globalProfile && parsed.globalProfile.trim()) {
       const content = parsed.globalProfile.slice(0, MAX_PROFILE_CHARS);
       if (content !== globalProfile?.content) {
-        await upsertProfile('global', 'global', content);
-        logger.info('Learner updated global profile');
+        await upsertProfile('global', 'global', content, costInfo);
+        logger.info('Learner updated global profile', { model: usedModel });
       }
     }
   } catch (err: any) {

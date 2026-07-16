@@ -43,19 +43,32 @@ export async function getAllProfiles(): Promise<ProfileRecord[]> {
   return result.rows;
 }
 
+export interface ProfileUpdateCost {
+  modelUsed: string;
+  costUsd: number;
+}
+
 export async function upsertProfile(
   key: string,
   type: string,
   content: string,
+  cost?: ProfileUpdateCost,
 ): Promise<ProfileRecord> {
   const existing = await getProfile(key);
 
   if (existing) {
-    // Archive current version before updating
+    // Archive current version before updating. Cost columns record what the
+    // learner call that produced the NEW version cost.
     await query(
-      `INSERT INTO roastbot_profile_history (profile_key, content, version)
-       VALUES ($1, $2, $3)`,
-      [existing.profile_key, existing.content, existing.version],
+      `INSERT INTO roastbot_profile_history (profile_key, content, version, model_used, cost_usd)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [
+        existing.profile_key,
+        existing.content,
+        existing.version,
+        cost?.modelUsed || null,
+        cost?.costUsd ?? 0,
+      ],
     );
 
     const result = await query(

@@ -59,5 +59,21 @@ export async function runMigrations(): Promise<void> {
     ON roastbot_profile_history(profile_key, version DESC);
   `);
 
+  // Cost tracking columns (idempotent ALTERs for existing installs).
+  // billed_usd was briefly added and then removed — drop it if present.
+  await query(`
+    ALTER TABLE roastbot_interactions
+      ADD COLUMN IF NOT EXISTS model_used VARCHAR(200),
+      ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12, 8) DEFAULT 0,
+      DROP COLUMN IF EXISTS billed_usd;
+  `);
+
+  await query(`
+    ALTER TABLE roastbot_profile_history
+      ADD COLUMN IF NOT EXISTS model_used VARCHAR(200),
+      ADD COLUMN IF NOT EXISTS cost_usd NUMERIC(12, 8) DEFAULT 0,
+      DROP COLUMN IF EXISTS billed_usd;
+  `);
+
   logger.info('Database migrations completed');
 }

@@ -2,6 +2,7 @@ import { ThinkingLevel } from '@google/genai';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
 import { withModelFallback } from '../utils/model-fallback';
+import { imageCallCost } from '../utils/pricing';
 
 // --- Prompt builder -----------------------------------------------------------
 // Tuned for gemini-3.1-flash-lite-image ("Nano Banana 2 Lite") based on the
@@ -49,7 +50,13 @@ function buildImageModelConfig(model: string): Record<string, unknown> {
 
 // --- Image generation --------------------------------------------------------------
 
-export async function generateMemeImage(caption: string, scene: string): Promise<Buffer | null> {
+export interface MemeResult {
+  image: Buffer;
+  model: string;
+  costUsd: number; // standard-rate cost (input tokens + one 1K image)
+}
+
+export async function generateMemeImage(caption: string, scene: string): Promise<MemeResult | null> {
   try {
     logger.info('Generating meme image...');
     let usedModel = '';
@@ -61,14 +68,16 @@ export async function generateMemeImage(caption: string, scene: string): Promise
         config: buildImageModelConfig(model),
       });
     });
-    logger.info('Meme image call succeeded', { model: usedModel });
+
+    const inputTokens = response.usageMetadata?.promptTokenCount || 0;
+    const costUsd = imageCallCost(usedModel, inputTokens);
+    logger.info('Meme image call succeeded', { model: usedModel, inputTokens, costUsd });
 
     const parts = response.candidates?.[0]?.content?.parts ?? [];
     for (const part of parts) {
       const data = (part as any).inlineData?.data;
       if (data) {
-        logger.info('Meme image generated');
-        return Buffer.from(data, 'base64');
+        return { image: Buffer.from(data, 'base64'), model: usedModel, costUsd };
       }
     }
     logger.warn('Image model returned no image part — falling back to text reply');
