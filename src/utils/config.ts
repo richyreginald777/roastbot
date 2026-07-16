@@ -16,7 +16,6 @@ function optional(name: string, fallback: string): string {
   return process.env[name] || fallback;
 }
 
-//gemini-3.1-flash-lite-image
 export const config = {
   slack: {
     botToken: required('ROASTBOT_SLACK_BOT_TOKEN'),
@@ -25,8 +24,16 @@ export const config = {
   },
   gemini: {
     apiKey: required('GEMINI_API_KEY'),
-    model: optional('ROASTBOT_GEMINI_MODEL', 'gemini-3-flash-preview'),
-    imageModel: optional('ROASTBOT_GEMINI_IMAGE_MODEL', 'gemini-3-flash-lite-image'),
+    // Fallback chains: first model is preferred; on rate limit / error the
+    // next in line is tried. Flash + Lite models only — no Pro.
+    textModels: optional(
+      'ROASTBOT_GEMINI_TEXT_MODELS',
+      'gemini-3.5-flash,gemini-3-flash-preview,gemini-3.1-flash-lite,gemini-2.5-flash,gemini-2.5-flash-lite',
+    ).split(',').map((s) => s.trim()).filter(Boolean),
+    imageModels: optional(
+      'ROASTBOT_GEMINI_IMAGE_MODELS',
+      'gemini-3.1-flash-lite-image,gemini-3.1-flash-image,gemini-2.5-flash-image',
+    ).split(',').map((s) => s.trim()).filter(Boolean),
   },
   db: {
     // DATABASE_URL (Supabase/managed-Postgres convention) takes precedence
