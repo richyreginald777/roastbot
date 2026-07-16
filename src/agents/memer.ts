@@ -1,6 +1,7 @@
 import { GoogleGenAI, ThinkingLevel } from '@google/genai';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
+import { withModelFallback } from '../utils/model-fallback';
 
 const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
@@ -25,23 +26,44 @@ The scene below the caption: ${scene || 'a simple cartoon that visualizes the ca
 The design is a flat cartoon illustration with thick outlines and bright, high-contrast colors. The composition is simple and bold with one clear focal point, instantly readable even as a small thumbnail. Every piece of text in the image is LARGE — never render small or fine print, it becomes illegible. Labels (if the scene names any) are 1-2 words in big bold capital letters placed directly on the object they belong to. Apart from the caption and those labels there is NO other text anywhere — no signs, posters, or screen text. Characters are generic cartoon people, never celebrities or real people. Keep it workplace-safe with no logos.`;
 }
 
+// --- Per-model call configuration ---------------------------------------------------
+// Different model generations support different params — build the config
+// dynamically so fallback models never receive a param they'd reject.
+//
+//   gemini-3.x image models  → imageConfig + thinkingConfig (minimal/high)
+//   gemini-2.5 image models  → imageConfig only (thinkingLevel doesn't exist → 400)
+
+function buildImageModelConfig(model: string): Record<string, unknown> {
+  const cfg: Record<string, unknown> = {
+    // 4:3 reads as "meme" in a Slack thread; the default wide frame
+    // produced letterboxed layouts with dead space
+    imageConfig: { aspectRatio: '4:3' },
+  };
+
+  if (model.startsWith('gemini-3')) {
+    // Default is MINIMAL; HIGH makes the model reason about composition
+    // and text placement before rendering — worth the extra seconds
+    cfg.thinkingConfig = { thinkingLevel: ThinkingLevel.HIGH };
+  }
+
+  return cfg;
+}
+
 // --- Image generation --------------------------------------------------------------
 
 export async function generateMemeImage(caption: string, scene: string): Promise<Buffer | null> {
   try {
-    logger.info('Generating meme image...', { model: config.gemini.imageModel });
-    const response = await ai.models.generateContent({
-      model: config.gemini.imageModel,
-      contents: buildMemePrompt(caption, scene),
-      config: {
-        // 4:3 reads as "meme" in a Slack thread; the model's default wide
-        // frame produced letterboxed layouts with dead space
-        imageConfig: { aspectRatio: '4:3' },
-        // Default is MINIMAL; HIGH makes the model reason about composition
-        // and text placement before rendering — worth the extra seconds
-        thinkingConfig: { thinkingLevel: ThinkingLevel.HIGH },
-      },
+    logger.info('Generating meme image...');
+    let usedModel = '';
+    const response = await withModelFallback(config.gemini.imageModels, (model) => {
+      usedModel = model;
+      return ai.models.generateContent({
+        model,
+        contents: buildMemePrompt(caption, scene),
+        config: buildImageModelConfig(model),
+      });
     });
+    logger.info('Meme image call succeeded', { model: usedModel });
 
     const parts = response.candidates?.[0]?.content?.parts ?? [];
     for (const part of parts) {

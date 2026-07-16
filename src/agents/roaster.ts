@@ -4,6 +4,7 @@ import { logger } from '../utils/logger';
 import { getProfile } from '../db/profiles';
 import { TriggerType } from '../db/interactions';
 import { ChannelMessage, ThreadTurn, threadManager } from '../state/thread-manager';
+import { withModelFallback } from '../utils/model-fallback';
 import { generateMemeImage } from './memer';
 
 const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
@@ -244,20 +245,24 @@ export async function runRoaster(input: RoasterInput): Promise<RoasterOutput> {
     style,
   );
 
-  logger.info('Running Gemini roaster...', { model: config.gemini.model, mode: input.mode, style: style.name });
+  logger.info('Running Gemini roaster...', { mode: input.mode, style: style.name });
 
   const totalTokens = { input: 0, output: 0 };
 
   const callModel = async (
     contents: string,
   ): Promise<{ parsed: { respond?: boolean; response?: string | null } | null }> => {
-    const response = await ai.models.generateContent({
-      model: config.gemini.model,
-      contents,
-      config: {
-        systemInstruction: STATIC_SYSTEM_PROMPT,
-        responseMimeType: 'application/json',
-      },
+    let usedModel = '';
+    const response = await withModelFallback(config.gemini.textModels, (model) => {
+      usedModel = model;
+      return ai.models.generateContent({
+        model,
+        contents,
+        config: {
+          systemInstruction: STATIC_SYSTEM_PROMPT,
+          responseMimeType: 'application/json',
+        },
+      });
     });
 
     const inputTokens = response.usageMetadata?.promptTokenCount || 0;
@@ -267,6 +272,7 @@ export async function runRoaster(input: RoasterInput): Promise<RoasterOutput> {
     const cachedTokens = (response.usageMetadata as any)?.cachedContentTokenCount || 0;
 
     logger.info('Gemini roaster responded', {
+      model: usedModel,
       inputTokens,
       outputTokens,
       cachedTokens,

@@ -3,6 +3,7 @@ import { config } from '../utils/config';
 import { logger } from '../utils/logger';
 import { getProfile, upsertProfile } from '../db/profiles';
 import { ThreadTurn } from '../state/thread-manager';
+import { withModelFallback } from '../utils/model-fallback';
 
 const ai = new GoogleGenAI({ apiKey: config.gemini.apiKey });
 
@@ -82,14 +83,16 @@ export async function learnFromExchange(
   ].join('\n');
 
   try {
-    const response = await ai.models.generateContent({
-      model: config.gemini.model,
-      contents: userMessage,
-      config: {
-        systemInstruction: STATIC_LEARNER_PROMPT,
-        responseMimeType: 'application/json',
-      },
-    });
+    const response = await withModelFallback(config.gemini.textModels, (model) =>
+      ai.models.generateContent({
+        model,
+        contents: userMessage,
+        config: {
+          systemInstruction: STATIC_LEARNER_PROMPT,
+          responseMimeType: 'application/json',
+        },
+      }),
+    );
 
     const raw = response.text || '{}';
     let parsed: { userProfile?: string | null; globalProfile?: string | null };
