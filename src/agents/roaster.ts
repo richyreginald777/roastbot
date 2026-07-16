@@ -5,6 +5,7 @@ import { TriggerType } from '../db/interactions';
 import { ChannelMessage, ThreadTurn, threadManager } from '../state/thread-manager';
 import { withModelFallback } from '../utils/model-fallback';
 import { textCallCost } from '../utils/pricing';
+import { parseModelJson } from '../utils/json-repair';
 import { generateMemeImage } from './memer';
 
 export interface RoasterInput {
@@ -264,6 +265,9 @@ export async function runRoaster(input: RoasterInput): Promise<RoasterOutput> {
         config: {
           systemInstruction: STATIC_SYSTEM_PROMPT,
           responseMimeType: 'application/json',
+          // Explicit ceiling — replies are short, but thinking models share
+          // this budget between reasoning and output, so keep it roomy
+          maxOutputTokens: 8192,
         },
       });
     });
@@ -284,12 +288,16 @@ export async function runRoaster(input: RoasterInput): Promise<RoasterOutput> {
       cacheHitRatio: inputTokens > 0 ? +(cachedTokens / inputTokens).toFixed(2) : 0,
     });
 
-    try {
-      return { parsed: JSON.parse(response.text || '{}') };
-    } catch {
-      logger.error('Failed to parse roaster response', { raw: response.text });
-      return { parsed: null };
+    const parsed = parseModelJson<{ respond?: boolean; response?: string | null }>(
+      response.text || '{}',
+    );
+    if (!parsed) {
+      logger.error('Failed to parse roaster response (even after repair)', {
+        raw: response.text,
+        finishReason: response.candidates?.[0]?.finishReason,
+      });
     }
+    return { parsed };
   };
 
   let { parsed } = await callModel(userMessage);
