@@ -58,6 +58,8 @@ export const config = {
     name: optional('ROASTBOT_DB_NAME', 'roastbot'),
   },
   bot: {
+    // Master switch for meme generation — false = text roasts only
+    memerEnabled: optional('ENABLE_MEMER', 'true') === 'true',
     cooldownMinutes: parseInt(optional('ROASTBOT_COOLDOWN_MINUTES', '10'), 10),
     channelHistoryLimit: parseInt(optional('ROASTBOT_CHANNEL_HISTORY_LIMIT', '15'), 10),
     memeProbability: parseFloat(optional('ROASTBOT_MEME_PROBABILITY', '0.3')),

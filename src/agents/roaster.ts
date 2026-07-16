@@ -4,6 +4,7 @@ import { getProfile } from '../db/profiles';
 import { TriggerType } from '../db/interactions';
 import { ChannelMessage, ThreadTurn, threadManager } from '../state/thread-manager';
 import { withModelFallback } from '../utils/model-fallback';
+import { textCallCost } from '../utils/pricing';
 import { generateMemeImage } from './memer';
 
 export interface RoasterInput {
@@ -114,6 +115,8 @@ export interface RoasterOutput {
   response: string | null;
   memeImage?: Buffer;           // present when this reply is a meme
   tokens: { input: number; output: number };
+  modelUsed?: string;           // e.g. "gemini-3.5-flash" or "gemini-3.5-flash+gemini-3.1-flash-lite-image"
+  costUsd?: number;             // standard-rate cost of all calls behind this reply
 }
 
 // Meme mode replaces the style directive: the text reply becomes the caption,
@@ -228,11 +231,12 @@ export async function runRoaster(input: RoasterInput): Promise<RoasterOutput> {
   const globalProfile = await getProfile('global');
   const userProfile = await getProfile(`user:${input.userId}`);
 
-  // Meme roll: explicit request always wins; otherwise a rare random treat,
-  // gated by a per-channel cooldown so image costs stay bounded.
+  // Meme roll: master switch first (ENABLE_MEMER), then explicit request,
+  // then a rare random treat gated by a per-channel cooldown.
   const isMeme =
-    input.forceMeme ||
-    (threadManager.canMeme(input.channelId) && Math.random() < config.bot.memeProbability);
+    config.bot.memerEnabled &&
+    (input.forceMeme ||
+      (threadManager.canMeme(input.channelId) && Math.random() < config.bot.memeProbability));
 
   const style = isMeme ? MEME_STYLE : pickStyle(input.channelId);
   const userMessage = buildUserMessage(
@@ -245,6 +249,8 @@ export async function runRoaster(input: RoasterInput): Promise<RoasterOutput> {
   logger.info('Running Gemini roaster...', { mode: input.mode, style: style.name });
 
   const totalTokens = { input: 0, output: 0 };
+  const totalCost = { cost: 0 };
+  const modelsUsed: string[] = [];
 
   const callModel = async (
     contents: string,
@@ -266,6 +272,8 @@ export async function runRoaster(input: RoasterInput): Promise<RoasterOutput> {
     const outputTokens = response.usageMetadata?.candidatesTokenCount || 0;
     totalTokens.input += inputTokens;
     totalTokens.output += outputTokens;
+    totalCost.cost += textCallCost(usedModel, inputTokens, outputTokens);
+    if (!modelsUsed.includes(usedModel)) modelsUsed.push(usedModel);
     const cachedTokens = (response.usageMetadata as any)?.cachedContentTokenCount || 0;
 
     logger.info('Gemini roaster responded', {
@@ -304,6 +312,10 @@ export async function runRoaster(input: RoasterInput): Promise<RoasterOutput> {
   }
 
   const tokens = totalTokens;
+  const baseCost = () => ({
+    modelUsed: modelsUsed.join('+') || undefined,
+    costUsd: totalCost.cost,
+  });
 
   if (!parsed) {
     // Mentions must always get something back — fall back to a canned line
@@ -312,9 +324,10 @@ export async function runRoaster(input: RoasterInput): Promise<RoasterOutput> {
         respond: true,
         response: "My roast generator just blue-screened. Consider yourself lucky. 🔥",
         tokens,
+        ...baseCost(),
       };
     }
-    return { respond: false, response: null, tokens };
+    return { respond: false, response: null, tokens, ...baseCost() };
   }
 
   // Mentions and thread replies always get a response, even if the model tries to stay silent
@@ -328,20 +341,28 @@ export async function runRoaster(input: RoasterInput): Promise<RoasterOutput> {
       respond: mustRespond,
       response: mustRespond ? "I had a roast ready but it was too devastating to publish. You win this round." : null,
       tokens,
+      ...baseCost(),
     };
   }
 
   // Meme rendering — failure falls back to the text reply, never blocks it
   if (respond && text && isMeme) {
     const memeScene = typeof (parsed as any).memeScene === 'string' ? (parsed as any).memeScene : '';
-    const image = await generateMemeImage(text, memeScene);
-    if (image) {
+    const meme = await generateMemeImage(text, memeScene);
+    if (meme) {
       threadManager.markMeme(input.channelId);
-      return { respond, response: text, memeImage: image, tokens };
+      return {
+        respond,
+        response: text,
+        memeImage: meme.image,
+        tokens,
+        modelUsed: [...modelsUsed, meme.model].join('+'),
+        costUsd: totalCost.cost + meme.costUsd,
+      };
     }
   }
 
-  return { respond, response: respond ? text : null, tokens };
+  return { respond, response: respond ? text : null, tokens, ...baseCost() };
 }
 
 // --- User message (dynamic content, most-stable-first for cache hits) -----------
