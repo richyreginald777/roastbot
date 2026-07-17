@@ -12,7 +12,7 @@ import { logger } from './logger';
 // NOTE: Gemini quotas are per Google Cloud project, not per key — rotation
 // only adds throughput when the keys come from different projects.
 
-const RATE_LIMIT_BENCH_MS = 60_000; // 429s: skip the pair for a minute
+const RATE_LIMIT_BENCH_MS = 60_000; // 429s with no retry hint: skip for a minute
 const ERROR_BENCH_MS = 30_000;      // other errors: shorter bench
 
 const clients: GoogleGenAI[] = config.gemini.apiKeys.map(
@@ -24,6 +24,37 @@ const benchedUntil = new Map<string, number>();
 function isRateLimitError(err: any): boolean {
   const msg = `${err?.message ?? ''} ${err?.status ?? ''} ${err?.code ?? ''}`;
   return /429|RESOURCE_EXHAUSTED|rate.?limit|quota/i.test(msg);
+}
+
+// Free-tier-aware bench duration. Gemini 429s carry machine-readable hints:
+// - QuotaFailure quotaId like "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+//   → the DAILY quota is gone; retrying before it resets (midnight Pacific,
+//   per the rate-limits docs) just wastes a probe per minute all day.
+// - RetryInfo retryDelay ("48s") → per-minute quota; bench exactly that long.
+function msUntilNextMidnightPacific(): number {
+  const nowPt = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/Los_Angeles' }));
+  const midnight = new Date(nowPt);
+  midnight.setHours(24, 0, 0, 0);
+  return midnight.getTime() - nowPt.getTime();
+}
+
+function benchDurationMs(err: any, rateLimited: boolean): number {
+  if (!rateLimited) return ERROR_BENCH_MS;
+
+  const msg = String(err?.message ?? '');
+
+  // Daily quota exhausted — bench until the midnight-PT reset (+2 min buffer)
+  if (/PerDay/i.test(msg)) {
+    return msUntilNextMidnightPacific() + 2 * 60_000;
+  }
+
+  // Per-minute quota — honour the server's suggested retry delay (+2 s buffer)
+  const retryMatch = msg.match(/retryDelay\\?"\s*:\s*\\?"(\d+(?:\.\d+)?)s/) || msg.match(/retry in (\d+(?:\.\d+)?)s/i);
+  if (retryMatch) {
+    return (parseFloat(retryMatch[1]) + 2) * 1000;
+  }
+
+  return RATE_LIMIT_BENCH_MS;
 }
 
 export async function withModelFallback<T>(
@@ -42,9 +73,11 @@ export async function withModelFallback<T>(
       } catch (err: any) {
         lastErr = err;
         const rateLimited = isRateLimitError(err);
-        benchedUntil.set(benchKey, Date.now() + (rateLimited ? RATE_LIMIT_BENCH_MS : ERROR_BENCH_MS));
+        const benchMs = benchDurationMs(err, rateLimited);
+        benchedUntil.set(benchKey, Date.now() + benchMs);
         logger.warn(`Model ${model} (key #${keyIdx + 1}) failed — trying next key/model`, {
           rateLimited,
+          benchedForMinutes: +(benchMs / 60_000).toFixed(1),
           error: String(err?.message ?? err),
         });
       }
