@@ -199,6 +199,32 @@ Respond with EXACTLY this JSON shape:
   "response": "your roast/joke/reply as a Slack message" | null
 }`;
 
+// --- Response schema ---------------------------------------------------------------
+// Structured output (constrained decoding): with responseJsonSchema set, the
+// API guarantees syntactically valid JSON matching this shape — this is the
+// root fix for the malformed-JSON responses observed from gemini-3.5-flash.
+// All text models in the fallback chain support structured outputs.
+
+const ROASTER_RESPONSE_SCHEMA = {
+  type: 'object',
+  properties: {
+    respond: {
+      type: 'boolean',
+      description: 'Whether to post a reply. Always true in DIRECT_ENGAGEMENT mode.',
+    },
+    response: {
+      type: ['string', 'null'],
+      description: 'The roast/joke/reply as a Slack message, or null when not responding.',
+    },
+    memeScene: {
+      type: ['string', 'null'],
+      description: 'MEME MODE only: 1-2 sentence visual design brief for the meme image. Null otherwise.',
+    },
+  },
+  required: ['respond', 'response'],
+  additionalProperties: false,
+};
+
 // --- Explanation scrubber ---------------------------------------------------------
 // Belt-and-suspenders: the system prompt forbids volunteering explanations, but a
 // model instruction is a request, not a guarantee. If the user's message did NOT
@@ -265,6 +291,7 @@ export async function runRoaster(input: RoasterInput): Promise<RoasterOutput> {
         config: {
           systemInstruction: STATIC_SYSTEM_PROMPT,
           responseMimeType: 'application/json',
+          responseJsonSchema: ROASTER_RESPONSE_SCHEMA,
           // Explicit ceiling — replies are short, but thinking models share
           // this budget between reasoning and output, so keep it roomy
           maxOutputTokens: 8192,

@@ -91,6 +91,22 @@ export async function learnFromExchange(
         config: {
           systemInstruction: STATIC_LEARNER_PROMPT,
           responseMimeType: 'application/json',
+          // Structured output: the API guarantees valid JSON matching this shape
+          responseJsonSchema: {
+            type: 'object',
+            properties: {
+              userProfile: {
+                type: ['string', 'null'],
+                description: 'Full updated markdown user profile, or null if no update is warranted.',
+              },
+              globalProfile: {
+                type: ['string', 'null'],
+                description: 'Full updated markdown global profile, or null if no update is warranted.',
+              },
+            },
+            required: ['userProfile', 'globalProfile'],
+            additionalProperties: false,
+          },
           // Learner returns two full profile documents (~4K tokens of JSON)
           // plus thinking budget — give it plenty of headroom
           maxOutputTokens: 16384,
